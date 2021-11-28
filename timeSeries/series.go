@@ -16,9 +16,9 @@ import (
 type seriesBucket struct {
     total float64
     count float64
-    average float64
 }
 
+// GetHourlyAverage - Get average value of metric in each hourly bucket
 func GetHourlyAverage(beginStr, endStr string) error {
     //Check if begin and end time string are in RFC3339 format
     beginTime, err := time.Parse(time.RFC3339, beginStr)
@@ -31,7 +31,7 @@ func GetHourlyAverage(beginStr, endStr string) error {
     }
     // Begin time cannot be greater than end time
     if beginTime.After(endTime) {
-        return fmt.Errorf("Begin is later than end")
+        return fmt.Errorf("begin time is later than end time")
     }
 
     // cpu cores number
@@ -43,12 +43,12 @@ func GetHourlyAverage(beginStr, endStr string) error {
     errs := make(chan error, cpuNum)
 
     var wg sync.WaitGroup
+    var mutex sync.Mutex
+
+    hourlyBucket := map[string]*seriesBucket{}
     // time duration between each batch
     batchDuration := time.Hour * 12
 
-    var mutex sync.Mutex
-    hourlyBucket := map[string]*seriesBucket{}
-    
     for batchBegin, batchEnd := beginTime, beginTime.Add(batchDuration); batchBegin.Before(endTime);
      batchBegin,batchEnd = batchEnd.Add(time.Hour*1), batchEnd.Add(batchDuration) {
         // Avoid batchEnd time overflow
@@ -67,12 +67,15 @@ func GetHourlyAverage(beginStr, endStr string) error {
                 Format(time.RFC3339))
             if err != nil {
                 errs <- err
+                log.Println(err)
                 return
             }
-
+            // parse response data, and set into bucket
             batchBucket, err := parseSeries(lines)
             if err != nil {
                 errs <- err
+                log.Println(err)
+                return
             }
             // write lock
             mutex.Lock()
@@ -84,19 +87,23 @@ func GetHourlyAverage(beginStr, endStr string) error {
     }
      wg.Wait()
      close(ch)
+    //  print hourly
+     printHourlyBucket(hourlyBucket)
+    return nil
+}
 
-     keys := make([]string, 0, len(hourlyBucket))
+// printHourlyBucket- print hourly bucket in increasing order
+func printHourlyBucket(hourlyBucket map[string]*seriesBucket) {
+    keys := make([]string, 0, len(hourlyBucket))
      // calculate the aerate value
      for k, _ := range hourlyBucket {
-         hourlyBucket[k].average = hourlyBucket[k].total / hourlyBucket[k].count
          keys = append(keys, k)
      }
      sort.Strings(keys)
      // print in increasing order
      for _, k := range keys {
-        log.Printf("%s:00:00Z %.4f", k, hourlyBucket[k].average)
+        fmt.Printf("%s:00:00Z %.4f\n", k, hourlyBucket[k].total / hourlyBucket[k].count)
      }
-    return nil
 }
 
 // ParseSeries- Parse the response data from endpoint, then append to hourly bucket
@@ -109,7 +116,11 @@ func parseSeries(str string) (map[string]*seriesBucket, error) {
         // skip illegal record
         if len(line) < 2 {
             continue
-        }
+        } 
+        // else {
+        //     fmt.Println("some thing is wrong2")
+        //     log.Print(line)
+        // }
         key := line[0][:13]
         metric, err := strconv.ParseFloat(line[1], 64)
         if err!= nil {
@@ -125,7 +136,8 @@ func parseSeries(str string) (map[string]*seriesBucket, error) {
     return  bucket, nil
 }
 
-// FetchSeriesWithDuration -Fetch series data from url, in the specific time range between begin and end
+// FetchSeriesWithDuration -Fetch series data from url,
+// in the specific time range between begin and end
 func fetchSeriesWithDuration(begin, end string) (string, error) {
     req, err := http.NewRequest("GET", "https://tsserv.tinkermode.dev/data", nil)
     if err != nil {
@@ -141,7 +153,7 @@ func fetchSeriesWithDuration(begin, end string) (string, error) {
     client := &http.Client{
         Timeout: timeout,
     }
-    log.Printf(" fetch from: %s, to: %s", begin, end)
+    // log.Printf(" fetch from: %s, to: %s", begin, end)
     // Do fetch job
     resp, err := client.Do(req)
     if err != nil {
