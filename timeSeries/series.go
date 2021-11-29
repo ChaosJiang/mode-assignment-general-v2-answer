@@ -40,7 +40,6 @@ func GetHourlyAverage(beginStr, endStr string) error {
 
     // make channel size corresponding to cpu core numbers
     ch := make(chan struct{}, cpuNum)
-    errs := make(chan error, cpuNum)
 
     var wg sync.WaitGroup
     var mutex sync.Mutex
@@ -66,14 +65,12 @@ func GetHourlyAverage(beginStr, endStr string) error {
             lines, err := fetchSeriesWithDuration(t1.Format(time.RFC3339), t2.Add(time.Minute*59 + time.Second*59).
                 Format(time.RFC3339))
             if err != nil {
-                errs <- err
                 log.Println(err)
                 return
             }
             // parse response data, and set into bucket
             batchBucket, err := parseSeries(lines)
             if err != nil {
-                errs <- err
                 log.Println(err)
                 return
             }
